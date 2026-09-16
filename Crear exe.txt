@@ -1,0 +1,15 @@
+
+  py -m PyInstaller --noconsole --onefile --icon=icono.ico --add-data "icono.ico;." --collect-all face_recognition --collect-all face_recognition_models main.py
+
+  py -m PyInstaller --onefile --windowed --collect-all ttkbootstrap main.py
+
+
+Generar .exe
+
+ py -m nuitka --onefile --enable-plugin=numpy --include-package-data=face_recognition_models --windows-icon-from-ico=icono.ico main.py
+
+Sin consola
+1===
+  py -m nuitka --onefile --disable-console --enable-plugin=numpy --include-package-data=face_recognition_models --windows-icon-from-ico=icono.ico main.py
+2===
+  py -m nuitka --onefile --disable-console --enable-plugin=numpy --enable-plugin=tk-inter --include-package-data=face_recognition_models --include-package-data=ttkbootstrap --windows-icon-from-ico=icono.ico main.py

@@ -1,0 +1,11 @@
+# Carpetas de compilación y distribución
+build/
+dist/
+main.dist/
+
+# Archivos pesados y ejecutables
+*.exe
+*.rar
+*.zip
+*.pyd
+*.dat
