@@ -1,0 +1,97 @@
+# Gym System
+
+Sistema de gestion para gimnasios desarrollado en Python con soporte para reconocimiento facial e interfaz grafica avanzada.
+
+---
+
+## Requisitos Previos
+
+Antes de ejecutar los comandos de compilacion, asegurese de contar con:
+
+* Python 3.x instalado y configurado en las variables de entorno.
+* Las dependencias del proyecto instaladas (`face_recognition`, `face_recognition_models`, `ttkbootstrap`, `numpy`).
+* PyInstaller o Nuitka instalados en el entorno de Python:
+```bash
+pip install pyinstaller nuitka
+
+```
+
+
+* El archivo de icono `icono.ico` ubicado en la raiz del proyecto.
+
+---
+
+## Guia de Compilacion a Ejecutable (.exe)
+
+A continuacion se detallan las opciones disponibles para empaquetar la aplicacion en un unico archivo ejecutable (`.exe`), utilizando **PyInstaller** o **Nuitka**.
+
+---
+
+### Opcion 1: Compilacion con PyInstaller
+
+PyInstaller permite empaquetar la aplicacion de forma rapida procesando todas las dependencias necesarias.
+
+#### Generar ejecutable con icono y soporte para reconocimiento facial
+
+Incluye el icono de la aplicacion y empaqueta las dependencias completas del modulo de reconocimiento facial:
+
+```bash
+py -m PyInstaller --noconsole --onefile --icon=icono.ico --add-data "icono.ico;." --collect-all face_recognition --collect-all face_recognition_models main.py
+
+```
+
+#### Generar ejecutable con interfaz grafica ttkbootstrap
+
+Empaqueta los recursos visuales y temas de la libreria `ttkbootstrap`:
+
+```bash
+py -m PyInstaller --onefile --windowed --collect-all ttkbootstrap main.py
+
+```
+
+---
+
+### Opcion 2: Compilacion con Nuitka
+
+Nuitka compila el codigo Python a C/C++ para obtener un mejor rendimiento y optimizacion en el archivo ejecutable resultante.
+
+#### Generar ejecutable basico (con consola visible)
+
+Compila la aplicacion incluyendo soporte para `numpy`, datos de reconocimiento facial e icono del sistema:
+
+```bash
+py -m nuitka --onefile --enable-plugin=numpy --include-package-data=face_recognition_models --windows-icon-from-ico=icono.ico main.py
+
+```
+
+#### Generar ejecutable final sin consola (Modo Produccion)
+
+##### Variante A: Con soporte para reconocimiento facial y NumPy
+
+Oculta la ventana de comandos de Windows durante la ejecucion:
+
+```bash
+py -m nuitka --onefile --disable-console --enable-plugin=numpy --include-package-data=face_recognition_models --windows-icon-from-ico=icono.ico main.py
+
+```
+
+##### Variante B: Completo (Reconocimiento facial + Tkinter + ttkbootstrap)
+
+Opcion recomendada para la version final. Incluye todos los plugins de interfaz grafica, recursos del tema visual y soporte de vision por computadora:
+
+```bash
+py -m nuitka --onefile --disable-console --enable-plugin=numpy --enable-plugin=tk-inter --include-package-data=face_recognition_models --include-package-data=ttkbootstrap --windows-icon-from-ico=icono.ico main.py
+
+```
+
+---
+
+## Parametros Utilizados
+
+| Parametro | Descripcion |
+| --- | --- |
+| `--onefile` | Empaqueta todo el programa y sus dependencias en un solo ejecutable `.exe`. |
+| `--noconsole` / `--disable-console` / `--windowed` | Oculta la ventana de terminal/símbolo del sistema al ejecutar la aplicacion. |
+| `--icon` / `--windows-icon-from-ico` | Asigna el archivo `.ico` como icono del ejecutable en Windows. |
+| `--collect-all` / `--include-package-data` | Garantiza que se incluyan todos los datos, modelos y archivos estaticos de los paquetes especificados. |
+| `--enable-plugin` | Activa integraciones especificas necesarias para el correcto funcionamiento de librerias como `numpy` o `tk-inter`. |
