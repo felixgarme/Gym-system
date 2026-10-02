@@ -56,11 +56,26 @@ void actualizarAnimacionBusqueda(Adafruit_ST7789 &tft) {
 
 void mostrarBSOD(Adafruit_ST7789 &tft) {
   estadoActual = ESTADO_DESCONECTADO;
-  tft.fillScreen(0x001F);
-  tft.setTextColor(0xFFFF); 
-  tft.setTextSize(6); tft.setCursor(15, 30); tft.print(":(");
-  tft.setTextSize(2); tft.setCursor(15, 100); tft.println("Desconectado.");
-  tft.setTextSize(1); tft.setCursor(15, 140); tft.println("Conecta el USB-C.");
+  uint16_t bgColor = colorWheel(tft, indiceRainbow);
+  
+  tft.fillRect(0, 0, 240, 100, bgColor);
+  tft.fillRect(0, 178, 240, 62, bgColor);
+  tft.fillRect(0, 100, 15, 78, bgColor);
+  tft.fillRect(171, 100, 69, 78, bgColor);
+  
+  tft.fillRect(15, 116, 156, 24, bgColor);
+  tft.fillRect(15, 148, 156, 7, bgColor);
+  tft.fillRect(15, 163, 156, 7, bgColor);
+
+  tft.setTextColor(0xFFFF, bgColor); 
+  tft.setTextSize(2); 
+  tft.setCursor(15, 100); 
+  tft.print("Desconectado.");
+  
+  tft.setTextSize(1); 
+  tft.setCursor(15, 140); tft.print("Reinicie el programa      ");
+  tft.setCursor(15, 155); tft.print("o vuelva a conectar       ");
+  tft.setCursor(15, 170); tft.print("el dispositivo            ");
 }
 
 // Marco "Viewfinder" tipo cámara futurista
@@ -101,7 +116,6 @@ void dibujarCheck(Adafruit_ST7789 &tft, uint16_t color) {
     tft.drawLine(105, 135-i, 160, 75-i, color); // Trazo largo
   }
 }
-
 
 // ================= CONFIGURACIÓN DE ESTADOS =================
 
@@ -161,6 +175,14 @@ void apagarFaceID() {
 
 void animarFaceID(Adafruit_ST7789 &tft) {
   
+  if (estadoActual == ESTADO_DESCONECTADO) {
+    if (millis() - ultimoRainbowUpdate > 50) {
+       indiceRainbow += 2;
+       mostrarBSOD(tft);
+       ultimoRainbowUpdate = millis();
+    }
+  }
+
   // --- 1. Animación BUSCANDO (Ojos robóticos elegantes con Arcoíris fluido) ---
   if (estadoActual == ESTADO_BUSCANDO) {
     

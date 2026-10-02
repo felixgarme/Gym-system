@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include "Animaciones.h"
 
+
 #define TFT_CS   7
 #define TFT_DC   1
 #define TFT_RST  0
@@ -49,6 +50,35 @@ void recibirImagen() {
     
     // ¡CRÍTICO! Alimenta el Watchdog Timer del ESP32 para evitar que 
     // se reinicie por "pensar" demasiado tiempo durante la recepción.
+    yield(); 
+  }
+  
+  ultimoMensaje = millis();
+  bsodMostrado = false;
+}
+
+void recibirFrameVideo() {
+  apagarFaceID(); 
+  
+  // OMITIMOS fillScreen(ST77XX_BLACK) para evitar el parpadeo durante el video.
+  // El nuevo frame simplemente sobreescribe al anterior.
+  
+  // Limpiamos cualquier basura en el puerto serial antes de empezar
+  while(Serial.available()) Serial.read();
+  
+  // Avisamos a Python que estamos listos para recibir el frame de video
+  Serial.println("READY_VIDEO");
+
+  // Recepción ultra rápida por bloques (línea por línea)
+  for(int y = 0; y < 240; y++) {
+    size_t leidos = Serial.readBytes((uint8_t*)bufferLinea, 480);
+    
+    if (leidos < 480) {
+      while(Serial.available()) Serial.read(); 
+      return; 
+    }
+    
+    tft.drawRGBBitmap(0, y, bufferLinea, 240, 1);
     yield(); 
   }
   
@@ -105,6 +135,7 @@ void loop() {
       Serial.println("PONG");
     }
     else if (comando == "START_IMG") { recibirImagen(); }
+    else if (comando == "START_VIDEO") { recibirFrameVideo(); } // <--- NUEVO COMANDO AÑADIDO
     else if (comando == "SET_BUSCANDO") { ultimoMensaje = millis(); setEstadoBuscando(tft); }
     else if (comando == "SET_RECONOCIENDO") { ultimoMensaje = millis(); setEstadoReconociendo(tft); }
     else if (comando == "SET_VERIFICADO") { ultimoMensaje = millis(); setEstadoVerificado(tft); }
