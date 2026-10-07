@@ -6,14 +6,16 @@ import ctypes
 import os
 import sys
 
-# Tus módulos locales
 import database
 import camara
-import vista_datos
-import vista_gestion
-import vista_registro
-import vista_importar
-import vista_stock  # <--- NUEVO MÓDULO IMPORTADO
+
+from vistas import vista_directorio
+from vistas import vista_gestion
+from vistas import vista_registro
+from vistas import vista_importar
+from vistas import vista_stock
+from vistas import vista_historial
+from vistas import vista_estadisticas  # nuevo
 
 def obtener_ruta_recurso(ruta_relativa):
     if hasattr(sys, '_MEIPASS'):
@@ -36,46 +38,51 @@ class GymApp:
 
         self.root.minsize(800, 600)
 
-        # Inicializar BD
         database.inicializar_db()
 
-        # Notebook (Pestañas) modernas
         self.notebook = ttk.Notebook(self.root, bootstyle="dark")
         self.notebook.pack(pady=15, fill=BOTH, expand=True, padx=15)
 
-        # Crear los contenedores de las pestañas
         self.tab_camara = ttk.Frame(self.notebook)
+        self.tab_historial = ttk.Frame(self.notebook)
+        self.tab_estadisticas = ttk.Frame(self.notebook)  # <-- NUEVO FRAME: Estadísticas
         self.tab_registro = ttk.Frame(self.notebook)
         self.tab_gestion = ttk.Frame(self.notebook)
         self.tab_datos = ttk.Frame(self.notebook)
-        self.tab_stock = ttk.Frame(self.notebook) # <--- NUEVA PESTAÑA CREADA
+        self.tab_stock = ttk.Frame(self.notebook)
         self.tab_importar = ttk.Frame(self.notebook)
 
-        # --- ORDEN DE PESTAÑAS (Control de acceso sigue primero) ---
         self.notebook.add(self.tab_camara, text=' 📷  Control de Acceso ')
+        self.notebook.add(self.tab_historial, text=' 🕒  Historial Hoy ')
+
         self.notebook.add(self.tab_registro, text=' 👤  Nuevo Socio ')
-        self.notebook.add(self.tab_gestion, text=' 🔍  Buscar / Renovar ')
+        self.notebook.add(self.tab_gestion, text=' 🔍  Editar Socio ')
         self.notebook.add(self.tab_datos, text=' 📋  Directorio ')
-        self.notebook.add(self.tab_stock, text=' 🛒  Stock de Productos ') # <--- PESTAÑA AÑADIDA AL MENÚ
+        self.notebook.add(self.tab_stock, text=' 🛒  Stock de Productos ')
         self.notebook.add(self.tab_importar, text=' 📥  Importar DG Madrid ')
-        # ----------------------------------------
+        self.notebook.add(self.tab_estadisticas, text=' 📊  Estadísticas ')  # <-- NUEVA PESTAÑA: Estadísticas
 
         self.frame_reg = ttk.Frame(self.tab_registro)
         self.frame_reg.pack(expand=True, fill=BOTH, padx=20, pady=20)
-        
+
         self.frame_cam = ttk.Frame(self.tab_camara)
         self.frame_cam.pack(expand=True, fill=BOTH)
 
         self.nombres_socios = []
 
-        # Cargar las vistas externas (estas heredarán el diseño moderno automáticamente)
+        # Inicialización de las vistas
         vista_registro.setup_tab_registro(self.frame_reg, self)
         vista_gestion.setup_tab_gestion(self.tab_gestion, self)
         vista_importar.setup_tab_importar(self.tab_importar, self)
-        vista_stock.setup_tab_stock(self.tab_stock, self)  # <--- CONFIGURACIÓN DE LA NUEVA PESTAÑA
+        vista_stock.setup_tab_stock(self.tab_stock, self)
+        vista_historial.setup_tab_historial(self.tab_historial)
+        
+        # <-- CARGAR NUEVA VISTA DE ESTADÍSTICAS EN LA PESTAÑA
+        # NOTA: Asegúrate de que la función se llame así en tu archivo vista_estadisticas.py
+        vista_estadisticas.setup_tab_historial(self.tab_estadisticas)
 
         self.setup_tab_camara()
-        self.actualizar_tabla_excel = vista_datos.setup_tab_datos(self.tab_datos)
+        self.actualizar_tabla_excel = vista_directorio.setup_tab_datos(self.tab_datos)
         self.cargar_nombres_socios()
 
     def cargar_nombres_socios(self):
@@ -83,7 +90,6 @@ class GymApp:
         self.nombres_socios = [socio[1] for socio in socios]
 
     def setup_tab_camara(self):
-        # Contenedor central
         card_container = ttk.Frame(self.frame_cam, padding=40)
         card_container.place(relx=0.5, rely=0.5, anchor=CENTER)
 
@@ -113,7 +119,6 @@ class GymApp:
 
         ttk.Label(frame_info, text=texto_info, justify=LEFT, bootstyle="secondary", font=("Segoe UI", 10)).pack()
 
-        # Botón moderno con color de acento rojo (bootstyle danger)
         ttk.Button(card_container, text="🔴 INICIAR CÁMARA", command=self.lanzar_camara, bootstyle="danger", padding=15).pack(pady=(20, 0), fill=X)
 
     def lanzar_camara(self):
@@ -135,8 +140,7 @@ class GymApp:
             self.root.deiconify()
 
 def iniciar_con_pantalla_carga():
-    # Inicializar ventana principal usando ttkbootstrap (Temas recomendados: darkly, superhero, cyborg)
-    root = ttk.Window(themename="darkly") 
+    root = ttk.Window(themename="darkly")
     root.withdraw()
 
     splash = tk.Toplevel(root)
@@ -158,7 +162,6 @@ def iniciar_con_pantalla_carga():
     lbl_estado = tk.Label(splash, text="Cargando base de datos e interfaz...", font=("Segoe UI", 10), bg="#1E1E1E", fg="#9CA3AF")
     lbl_estado.pack(pady=(0, 20))
 
-    # Barra de progreso animada de ttkbootstrap
     progreso = ttk.Progressbar(splash, bootstyle="success-striped", orient=HORIZONTAL, length=350, mode="indeterminate")
     progreso.pack(pady=10)
     progreso.start(15)

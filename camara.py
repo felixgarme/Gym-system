@@ -14,8 +14,8 @@ proceso_pantalla = None
 
 def iniciar_servidor_pantalla():
     global proceso_pantalla
-    print("Iniciando pantalla.py en segundo plano...")
-    proceso_pantalla = subprocess.Popen([sys.executable, "pantalla.py"])
+    print("Iniciando pantalla.exe en segundo plano...")
+    proceso_pantalla = subprocess.Popen(["pantalla.exe"])
     time.sleep(3)
 
 def enviar_orden_pantalla(comando):

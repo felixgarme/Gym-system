@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+from tkinter import font as tkfont
 import os
 import cv2
 import time
@@ -15,65 +16,69 @@ def setup_tab_gestion(parent_frame, app):
     app.socio_actual_cargado = ""
     app.ultima_revision_fotos = {}
 
+    fuente_normal = tkfont.Font(family="Arial", size=10)
+    fuente_negrita = tkfont.Font(family="Arial", size=10, weight="bold")
+    fuente_lista = tkfont.Font(family="Arial", size=10)
+
     main_container = ttk.Frame(parent_frame)
-    main_container.pack(fill='both', expand=True, padx=15, pady=15)
+    main_container.pack(fill='both', expand=True, padx=12, pady=12)
 
     frame_busqueda = ttk.Frame(main_container)
     frame_busqueda.pack(fill='x', pady=(0, 10))
 
-    ttk.Label(frame_busqueda, text="Buscar Socio:", font=("Arial", 10, "bold")).pack(side='left', padx=(0, 10))
-
-    entry_buscar = ttk.Entry(frame_busqueda, font=("Arial", 10))
-    entry_buscar.pack(side='left', fill='x', expand=True, padx=(0, 10))
-    app.buscar_nombre = entry_buscar
+    ttk.Label(frame_busqueda, text="Buscar Socio:", font=fuente_negrita).pack(side='left', padx=(0, 10))
 
     btn_buscar = ttk.Button(frame_busqueda, text="🔍 Buscar", command=lambda: ejecutar_busqueda_completa())
     btn_buscar.pack(side='right')
 
-    listbox_sugerencias = tk.Listbox(main_container, height=5, font=("Arial", 9), selectmode=tk.SINGLE, cursor="hand2")
+    entry_buscar = ttk.Entry(frame_busqueda, font=fuente_normal)
+    entry_buscar.pack(side='left', fill='x', expand=True, padx=(0, 10))
+    app.buscar_nombre = entry_buscar
+
+    listbox_sugerencias = tk.Listbox(
+        main_container, height=5, font=fuente_lista,
+        selectmode=tk.BROWSE,
+        exportselection=False,
+        activestyle='none',
+        cursor="hand2",
+        highlightthickness=1,
+        relief='solid', borderwidth=1
+    )
 
     ttk.Separator(main_container, orient='horizontal').pack(fill='x', pady=5)
 
     frame_contenido = ttk.Frame(main_container)
     frame_contenido.pack(fill='both', expand=True, pady=5)
 
-    # LAYOUT RÍGIDO (Proporción 40% datos - 60% fotos)
-    frame_contenido.columnconfigure(0, weight=2, uniform="col_principal")
-    frame_contenido.columnconfigure(1, weight=3, uniform="col_principal")
+    frame_contenido.columnconfigure(0, weight=2, uniform="col_principal", minsize=220)
+    frame_contenido.columnconfigure(1, weight=3, uniform="col_principal", minsize=280)
     frame_contenido.rowconfigure(0, weight=1)
 
-    frame_datos = ttk.LabelFrame(frame_contenido, text=" Datos de Membresía ", padding=15)
-    frame_datos.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
+    frame_datos = ttk.LabelFrame(frame_contenido, text=" Datos de Membresía ", padding=12)
+    frame_datos.grid(row=0, column=0, sticky='nsew', padx=(0, 8))
 
-    ttk.Label(frame_datos, text="Fecha Inicio:").grid(row=0, column=0, sticky='w', pady=10)
-    act_inicio = ttk.Entry(frame_datos)
-    act_inicio.grid(row=0, column=1, sticky='ew', pady=10, padx=(5, 0))
+    ttk.Label(frame_datos, text="Fecha Inicio:", font=fuente_normal).grid(row=0, column=0, sticky='w', pady=8)
+    act_inicio = ttk.Entry(frame_datos, font=fuente_normal)
+    act_inicio.grid(row=0, column=1, sticky='ew', pady=8, padx=(5, 0))
 
-    ttk.Label(frame_datos, text="Fecha Vence:").grid(row=1, column=0, sticky='w', pady=10)
-    act_fin = ttk.Entry(frame_datos)
-    act_fin.grid(row=1, column=1, sticky='ew', pady=10, padx=(5, 0))
+    ttk.Label(frame_datos, text="Fecha Vence:", font=fuente_normal).grid(row=1, column=0, sticky='w', pady=8)
+    act_fin = ttk.Entry(frame_datos, font=fuente_normal)
+    act_fin.grid(row=1, column=1, sticky='ew', pady=8, padx=(5, 0))
 
-    ttk.Label(frame_datos, text="Medio Pago:").grid(row=2, column=0, sticky='w', pady=10)
-    act_pago = ttk.Combobox(frame_datos, values=["Efectivo", "Yape", "Plin", "Tarjeta"], state="readonly")
-    act_pago.grid(row=2, column=1, sticky='ew', pady=10, padx=(5, 0))
+    ttk.Label(frame_datos, text="Medio Pago:", font=fuente_normal).grid(row=2, column=0, sticky='w', pady=8)
+    act_pago = ttk.Combobox(frame_datos, values=["Efectivo", "Yape", "Plin", "Tarjeta"],
+                            state="readonly", font=fuente_normal)
+    act_pago.grid(row=2, column=1, sticky='ew', pady=8, padx=(5, 0))
 
     frame_datos.columnconfigure(1, weight=1)
+    frame_datos.rowconfigure(4, weight=1)
 
     btn_actualizar = ttk.Button(frame_datos, text="💾 Actualizar / Renovar",
                                 command=lambda: actualizar_socio(app, entry_buscar, act_inicio, act_fin, act_pago))
-    btn_actualizar.grid(row=3, column=0, columnspan=2, pady=(20, 0), sticky='ew')
+    btn_actualizar.grid(row=3, column=0, columnspan=2, pady=(16, 0), sticky='ew')
 
-    frame_fotos_wrapper = ttk.LabelFrame(frame_contenido, text=" Fotografías del Socio ", padding=10)
-    frame_fotos_wrapper.grid(row=0, column=1, sticky='nsew', padx=(10, 0))
-
-    frame_fotos = ttk.Frame(frame_fotos_wrapper)
-    frame_fotos.pack(fill='both', expand=True, pady=(0, 10))
-    frame_fotos.grid_propagate(False) 
-
-    lbl_estado_foto = ttk.Label(frame_fotos, text="Busca un socio para\nver sus fotografías.", justify="center", foreground="gray")
-    lbl_estado_foto.grid(row=0, column=0, sticky="nsew")
-    frame_fotos.rowconfigure(0, weight=1)
-    frame_fotos.columnconfigure(0, weight=1)
+    frame_fotos_wrapper = ttk.LabelFrame(frame_contenido, text=" Fotografías del Socio ", padding=8)
+    frame_fotos_wrapper.grid(row=0, column=1, sticky='nsew', padx=(8, 0))
 
     frame_acciones_fotos = ttk.Frame(frame_fotos_wrapper)
     frame_acciones_fotos.pack(fill='x', side='bottom')
@@ -86,17 +91,40 @@ def setup_tab_gestion(parent_frame, app):
                                 command=lambda: capturar_foto_socio(app, entry_buscar.get()))
     btn_tomar_foto.pack(side='right', fill='x', expand=True, padx=(5, 0))
 
+    frame_fotos = ttk.Frame(frame_fotos_wrapper)
+    frame_fotos.pack(fill='both', expand=True, pady=(0, 8))
+    frame_fotos.grid_propagate(False)
+
+    lbl_estado_foto = ttk.Label(frame_fotos, text="Busca un socio para\nver sus fotografías.",
+                                justify="center", foreground="gray", font=fuente_normal)
+    lbl_estado_foto.grid(row=0, column=0, sticky="nsew")
+    frame_fotos.rowconfigure(0, weight=1)
+    frame_fotos.columnconfigure(0, weight=1)
+
+    def ajustar_tamanos(event=None):
+        ancho = main_container.winfo_width()
+        if ancho <= 1:
+            return
+        tam = max(9, min(14, ancho // 85))
+        if fuente_normal.cget("size") != tam:
+            fuente_normal.configure(size=tam)
+            fuente_negrita.configure(size=tam)
+            fuente_lista.configure(size=max(9, tam - 1))
+        if listbox_sugerencias.winfo_ismapped():
+            posicionar_lista()
+
+    main_container.bind("<Configure>", ajustar_tamanos)
+
     def cargar_fotos(nombre_socio):
         global imagenes_referencia
         imagenes_referencia.clear()
-        
+
         app.socio_actual_cargado = nombre_socio
 
         frame_fotos.unbind("<Configure>")
         for widget in frame_fotos.winfo_children():
             widget.destroy()
 
-        # REINICIAR LAS COLUMNAS PREVIAS PARA QUE NO QUEDEN ESPACIOS VACÍOS
         cols_actuales, _ = frame_fotos.grid_size()
         for col in range(max(cols_actuales, 5)):
             frame_fotos.columnconfigure(col, weight=0, uniform="")
@@ -119,14 +147,14 @@ def setup_tab_gestion(parent_frame, app):
 
         archivos.sort(key=lambda x: os.path.getmtime(os.path.join(ruta_carpeta, x)), reverse=True)
         archivos_mostrar = archivos[:3]
-        
+
         app.ultima_revision_fotos = {f: os.path.getmtime(os.path.join(ruta_carpeta, f)) for f in archivos_mostrar}
 
         pil_images = []
         labels = []
 
         frame_fotos.rowconfigure(0, weight=1)
-        
+
         for i in range(len(archivos_mostrar)):
             frame_fotos.columnconfigure(i, weight=1, uniform="col_foto")
 
@@ -183,16 +211,16 @@ def setup_tab_gestion(parent_frame, app):
             if os.path.exists(ruta_carpeta):
                 archivos = [f for f in os.listdir(ruta_carpeta) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
                 archivos.sort(key=lambda x: os.path.getmtime(os.path.join(ruta_carpeta, x)), reverse=True)
-                
+
                 estado_actual = {f: os.path.getmtime(os.path.join(ruta_carpeta, f)) for f in archivos[:3]}
-                
+
                 if estado_actual != app.ultima_revision_fotos:
                     cargar_fotos(nombre)
                     reencodear_y_actualizar_socio(nombre)
             else:
                 if app.ultima_revision_fotos != {}:
                     cargar_fotos(nombre)
-        
+
         main_container.after(2000, verificar_cambios_fotos)
 
     verificar_cambios_fotos()
@@ -212,13 +240,24 @@ def setup_tab_gestion(parent_frame, app):
             act_fin.delete(0, tk.END)
             act_fin.insert(0, datos[1])
             act_pago.set(datos[2])
-            
+
             cargar_fotos(nombre)
         else:
             messagebox.showerror("No encontrado", f"El socio '{nombre}' no existe.")
 
+    def posicionar_lista():
+        """Coloca la lista justo debajo del Entry con su mismo ancho."""
+        main_container.update_idletasks()
+        x = entry_buscar.winfo_rootx() - main_container.winfo_rootx()
+        y = entry_buscar.winfo_rooty() - main_container.winfo_rooty() + entry_buscar.winfo_height() + 2
+        ancho = max(entry_buscar.winfo_width(), 120)
+        listbox_sugerencias.place(x=x, y=y, width=ancho)
+        listbox_sugerencias.lift()
+
     def filtrar_autocompletado(event):
-        if event.keysym in ("Up", "Down", "Return", "Escape"):
+        if event.keysym in ("Up", "Down", "Return", "KP_Enter", "Escape", "Tab",
+                            "Shift_L", "Shift_R", "Control_L", "Control_R",
+                            "Left", "Right", "Home", "End"):
             return
         texto = entry_buscar.get().strip().lower()
         listbox_sugerencias.delete(0, tk.END)
@@ -229,33 +268,100 @@ def setup_tab_gestion(parent_frame, app):
         if coincidencias:
             for nombre in coincidencias:
                 listbox_sugerencias.insert(tk.END, nombre)
-            listbox_sugerencias.place(in_=frame_busqueda, x=entry_buscar.winfo_x(),
-                                      y=entry_buscar.winfo_height() + 2, width=entry_buscar.winfo_width())
-            listbox_sugerencias.lift()
+            listbox_sugerencias.configure(height=min(len(coincidencias), 6))
+            posicionar_lista()
         else:
             listbox_sugerencias.place_forget()
 
-    def mover_foco_a_lista(event):
-        if listbox_sugerencias.winfo_ismapped() and listbox_sugerencias.size() > 0:
-            listbox_sugerencias.focus_set()
-            listbox_sugerencias.selection_clear(0, tk.END)
-            listbox_sugerencias.selection_set(0)
-            listbox_sugerencias.activate(0)
+    def lista_visible():
+        return listbox_sugerencias.winfo_ismapped() and listbox_sugerencias.size() > 0
 
-    def seleccionar_sugerencia(event):
-        if not listbox_sugerencias.curselection():
-            return
-        indice = listbox_sugerencias.curselection()[0]
-        nombre_seleccionado = listbox_sugerencias.get(indice)
+    def _marcar(indice):
+        listbox_sugerencias.selection_clear(0, tk.END)
+        listbox_sugerencias.selection_set(indice)
+        listbox_sugerencias.activate(indice)
+        listbox_sugerencias.see(indice)
+
+    def entry_flecha_abajo(event):
+        """Flecha abajo en el Entry: pasa el foco a la lista y marca el primero."""
+        if lista_visible():
+            listbox_sugerencias.focus_set()
+            _marcar(0)
+            return "break"
+
+    def entry_flecha_arriba(event):
+        """Flecha arriba en el Entry: pasa a la lista marcando el último."""
+        if lista_visible():
+            listbox_sugerencias.focus_set()
+            _marcar(listbox_sugerencias.size() - 1)
+            return "break"
+
+    def lista_flecha_abajo(event):
+        total = listbox_sugerencias.size()
+        sel = listbox_sugerencias.curselection()
+        actual = sel[0] if sel else -1
+        _marcar(min(actual + 1, total - 1))
+        return "break"
+
+    def lista_flecha_arriba(event):
+        sel = listbox_sugerencias.curselection()
+        actual = sel[0] if sel else 0
+        if actual <= 0:
+            entry_buscar.focus_set()
+            entry_buscar.icursor(tk.END)
+        else:
+            _marcar(actual - 1)
+        return "break"
+
+    def seleccionar_sugerencia(event=None):
+        sel = listbox_sugerencias.curselection()
+        if not sel:
+            return "break"
+        nombre_seleccionado = listbox_sugerencias.get(sel[0])
         entry_buscar.delete(0, tk.END)
         entry_buscar.insert(0, nombre_seleccionado)
         listbox_sugerencias.place_forget()
         entry_buscar.focus_set()
+        entry_buscar.icursor(tk.END)
         ejecutar_busqueda_completa()
+        return "break"
 
-    def ocultar_lista(event):
+    def clic_en_lista(event):
+        """El clic marca el elemento bajo el cursor y lo selecciona al soltar."""
+        indice = listbox_sugerencias.nearest(event.y)
+        if indice >= 0:
+            _marcar(indice)
+            seleccionar_sugerencia()
+        return "break"
+
+    def ocultar_lista(event=None):
         listbox_sugerencias.place_forget()
         entry_buscar.focus_set()
+        return "break"
+
+    def escribir_desde_lista(event):
+        """Si se escribe estando en la lista, vuelve al Entry y continúa escribiendo."""
+        if event.keysym == "BackSpace":
+            entry_buscar.focus_set()
+            texto = entry_buscar.get()
+            entry_buscar.delete(0, tk.END)
+            entry_buscar.insert(0, texto[:-1])
+            entry_buscar.icursor(tk.END)
+            filtrar_autocompletado(event)
+            return "break"
+        if event.char and event.char.isprintable() and len(event.char) == 1:
+            entry_buscar.focus_set()
+            entry_buscar.insert(tk.END, event.char)
+            entry_buscar.icursor(tk.END)
+            filtrar_autocompletado(event)
+            return "break"
+
+    def ocultar_si_clic_fuera(event):
+        if not listbox_sugerencias.winfo_ismapped():
+            return
+        if event.widget in (listbox_sugerencias, entry_buscar):
+            return
+        listbox_sugerencias.place_forget()
 
     def abrir_carpeta_socio_actual(nombre):
         nombre = nombre.strip()
@@ -310,11 +416,21 @@ def setup_tab_gestion(parent_frame, app):
             messagebox.showinfo("Éxito", f"Nueva foto agregada y perfil facial actualizado para '{nombre}'.")
 
     entry_buscar.bind('<KeyRelease>', filtrar_autocompletado)
-    entry_buscar.bind('<Down>', mover_foco_a_lista)
+    entry_buscar.bind('<Down>', entry_flecha_abajo)
+    entry_buscar.bind('<Up>', entry_flecha_arriba)
     entry_buscar.bind('<Return>', ejecutar_busqueda_completa)
-    listbox_sugerencias.bind('<<ListboxSelect>>', seleccionar_sugerencia)
+    entry_buscar.bind('<KP_Enter>', ejecutar_busqueda_completa)
+    entry_buscar.bind('<Escape>', ocultar_lista)
+
+    listbox_sugerencias.bind('<Down>', lista_flecha_abajo)
+    listbox_sugerencias.bind('<Up>', lista_flecha_arriba)
     listbox_sugerencias.bind('<Return>', seleccionar_sugerencia)
+    listbox_sugerencias.bind('<KP_Enter>', seleccionar_sugerencia)
     listbox_sugerencias.bind('<Escape>', ocultar_lista)
+    listbox_sugerencias.bind('<ButtonRelease-1>', clic_en_lista)
+    listbox_sugerencias.bind('<Key>', escribir_desde_lista, add='+')
+
+    parent_frame.winfo_toplevel().bind('<Button-1>', ocultar_si_clic_fuera, add='+')
 
 def reencodear_y_actualizar_socio(nombre):
     ruta_carpeta = os.path.join(database.CARPETA_PRINCIPAL, nombre)

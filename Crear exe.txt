@@ -13,3 +13,8 @@ Sin consola
   py -m nuitka --onefile --disable-console --enable-plugin=numpy --include-package-data=face_recognition_models --windows-icon-from-ico=icono.ico main.py
 2===
   py -m nuitka --onefile --disable-console --enable-plugin=numpy --enable-plugin=tk-inter --include-package-data=face_recognition_models --include-package-data=ttkbootstrap --windows-icon-from-ico=icono.ico main.py
+
+
+Pantalla
+
+  py -m nuitka --onefile --disable-console pantalla.py
