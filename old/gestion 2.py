@@ -12,31 +12,9 @@ import database
 
 imagenes_referencia = []
 
-def abrir_camara(indice):
-    """Abre una cámara por índice (usa DirectShow en Windows para mayor compatibilidad)."""
-    if os.name == 'nt':
-        return cv2.VideoCapture(indice, cv2.CAP_DSHOW)
-    return cv2.VideoCapture(indice)
-
-def detectar_camaras(max_indices=6):
-    """Devuelve la lista de índices de cámaras que funcionan."""
-    disponibles = []
-    for i in range(max_indices):
-        cap = abrir_camara(i)
-        try:
-            if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
-                    disponibles.append(i)
-        finally:
-            cap.release()
-    return disponibles
-
 def setup_tab_gestion(parent_frame, app):
     app.socio_actual_cargado = ""
     app.ultima_revision_fotos = {}
-    app.camara_indice = 0
-    app.camaras_disponibles = [0]
 
     fuente_normal = tkfont.Font(family="Arial", size=10)
     fuente_negrita = tkfont.Font(family="Arial", size=10, weight="bold")
@@ -105,27 +83,11 @@ def setup_tab_gestion(parent_frame, app):
     frame_acciones_fotos = ttk.Frame(frame_fotos_wrapper)
     frame_acciones_fotos.pack(fill='x', side='bottom')
 
-    frame_camara = ttk.Frame(frame_acciones_fotos)
-    frame_camara.pack(fill='x', pady=(0, 6))
-
-    ttk.Label(frame_camara, text="Cámara:", font=fuente_normal).pack(side='left', padx=(0, 5))
-
-    combo_camara = ttk.Combobox(frame_camara, values=["Cámara 0"], state="readonly", font=fuente_normal)
-    combo_camara.current(0)
-    combo_camara.pack(side='left', fill='x', expand=True, padx=(0, 5))
-
-    btn_refrescar_camaras = ttk.Button(frame_camara, text="🔄", width=3,
-                                       command=lambda: refrescar_camaras())
-    btn_refrescar_camaras.pack(side='right')
-
-    frame_botones_fotos = ttk.Frame(frame_acciones_fotos)
-    frame_botones_fotos.pack(fill='x')
-
-    btn_abrir_carpeta = ttk.Button(frame_botones_fotos, text="📂 Abrir Carpeta",
+    btn_abrir_carpeta = ttk.Button(frame_acciones_fotos, text="📂 Abrir Carpeta",
                                    command=lambda: abrir_carpeta_socio_actual(entry_buscar.get()))
     btn_abrir_carpeta.pack(side='left', fill='x', expand=True, padx=(0, 5))
 
-    btn_tomar_foto = ttk.Button(frame_botones_fotos, text="📷 Tomar Foto",
+    btn_tomar_foto = ttk.Button(frame_acciones_fotos, text="📷 Tomar Foto",
                                 command=lambda: capturar_foto_socio(app, entry_buscar.get()))
     btn_tomar_foto.pack(side='right', fill='x', expand=True, padx=(5, 0))
 
@@ -138,42 +100,6 @@ def setup_tab_gestion(parent_frame, app):
     lbl_estado_foto.grid(row=0, column=0, sticky="nsew")
     frame_fotos.rowconfigure(0, weight=1)
     frame_fotos.columnconfigure(0, weight=1)
-
-    def actualizar_combo_camaras():
-        """Rellena el combobox con las cámaras detectadas y conserva la seleccionada."""
-        etiquetas = [f"Cámara {i}" for i in app.camaras_disponibles]
-        combo_camara.configure(values=etiquetas)
-        if app.camara_indice in app.camaras_disponibles:
-            combo_camara.current(app.camaras_disponibles.index(app.camara_indice))
-        else:
-            app.camara_indice = app.camaras_disponibles[0]
-            combo_camara.current(0)
-
-    def refrescar_camaras():
-        btn_refrescar_camaras.configure(state='disabled')
-        combo_camara.configure(state='disabled')
-        main_container.update_idletasks()
-        try:
-            encontradas = detectar_camaras()
-        finally:
-            btn_refrescar_camaras.configure(state='normal')
-            combo_camara.configure(state='readonly')
-
-        if not encontradas:
-            messagebox.showwarning("Cámaras", "No se detectó ninguna cámara conectada.")
-            encontradas = [0]
-
-        app.camaras_disponibles = encontradas
-        actualizar_combo_camaras()
-
-    def al_cambiar_camara(event=None):
-        pos = combo_camara.current()
-        if 0 <= pos < len(app.camaras_disponibles):
-            app.camara_indice = app.camaras_disponibles[pos]
-
-    combo_camara.bind("<<ComboboxSelected>>", al_cambiar_camara)
-
-    main_container.after(300, refrescar_camaras)
 
     def ajustar_tamanos(event=None):
         ancho = main_container.winfo_width()
@@ -453,25 +379,13 @@ def setup_tab_gestion(parent_frame, app):
         ruta_carpeta = os.path.join(database.CARPETA_PRINCIPAL, nombre)
         os.makedirs(ruta_carpeta, exist_ok=True)
 
-        indice_actual = app.camara_indice
-        cap = abrir_camara(indice_actual)
+        cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            messagebox.showerror(
-                "Error de Cámara",
-                f"No se pudo acceder a la cámara {indice_actual}.\n"
-                "Prueba seleccionando otra cámara en la lista."
-            )
+            messagebox.showerror("Error de Cámara", "No se pudo acceder a la cámara web.")
             return
 
-        messagebox.showinfo(
-            "Tomar Foto",
-            "Se abrirá la cámara.\n\n"
-            "- Presiona ESPACIO para tomar la foto.\n"
-            "- Presiona C para cambiar de cámara.\n"
-            "- Presiona ESC para cancelar."
-        )
+        messagebox.showinfo("Tomar Foto", "Se abrirá la cámara.\n\n- Presiona ESPACIO para tomar la foto.\n- Presiona ESC para cancelar.")
 
-        titulo_ventana = f"Tomar Foto - {nombre}"
         foto_guardada = False
         while True:
             ret, frame = cap.read()
@@ -479,11 +393,9 @@ def setup_tab_gestion(parent_frame, app):
                 break
 
             display_frame = frame.copy()
-            cv2.putText(display_frame, "ESPACIO: Tomar Foto | C: Cambiar camara | ESC: Salir", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
-            cv2.putText(display_frame, f"Camara {indice_actual}", (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-            cv2.imshow(titulo_ventana, display_frame)
+            cv2.putText(display_frame, "ESPACIO: Tomar Foto | ESC: Salir", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.imshow(f"Tomar Foto - {nombre}", display_frame)
 
             key = cv2.waitKey(1) & 0xFF
             if key == 32:
@@ -494,21 +406,6 @@ def setup_tab_gestion(parent_frame, app):
                 break
             elif key == 27:
                 break
-            elif key in (ord('c'), ord('C')):
-                lista = app.camaras_disponibles
-                if len(lista) > 1:
-                    pos = lista.index(indice_actual) if indice_actual in lista else -1
-                    siguiente = lista[(pos + 1) % len(lista)]
-                    nuevo_cap = abrir_camara(siguiente)
-                    if nuevo_cap.isOpened():
-                        cap.release()
-                        cap = nuevo_cap
-                        indice_actual = siguiente
-                        app.camara_indice = siguiente
-                        if siguiente in lista:
-                            combo_camara.current(lista.index(siguiente))
-                    else:
-                        nuevo_cap.release()
 
         cap.release()
         cv2.destroyAllWindows()
