@@ -8,9 +8,43 @@ import socket
 import subprocess
 import sys
 import time
+import threading
 
 ultimo_estado_enviado = None
 proceso_pantalla = None
+
+def reproducir_sonido(tipo="simple"):
+    """ Reproduce un pitido simple, doble o largo según el estado """
+    if os.name == 'nt':
+        import winsound
+        if tipo == "doble":
+            winsound.Beep(1000, 200)
+            time.sleep(0.05)
+            winsound.Beep(1000, 200)
+        elif tipo == "largo":
+            winsound.Beep(600, 1500)
+        else:
+            winsound.Beep(1000, 250)
+    else:
+        if tipo == "doble":
+            sys.stdout.write('\a')
+            sys.stdout.flush()
+            time.sleep(0.2)
+            sys.stdout.write('\a')
+            sys.stdout.flush()
+        elif tipo == "largo":
+            sys.stdout.write('\a')
+            sys.stdout.flush()
+            time.sleep(0.6)
+            sys.stdout.write('\a')
+            sys.stdout.flush()
+        else:
+            sys.stdout.write('\a')
+            sys.stdout.flush()
+
+def emitir_pitido_async(tipo="simple"):
+    """ Llama a reproducir_sonido en un hilo separado para no congelar el video """
+    threading.Thread(target=reproducir_sonido, args=(tipo,), daemon=True).start()
 
 def iniciar_servidor_pantalla():
     global proceso_pantalla
@@ -86,7 +120,10 @@ def iniciar_reconocimiento(idx_camara=0):
 
     tiempo_ultimo_estado_valido = 0
     estado_retenido = "1"
+    estado_anterior_pitido = "1"
     TIEMPO_RETENCION = 3.0
+
+    sonido_activado = True
 
     while True:
         ret, frame = video_capture.read()
@@ -161,7 +198,6 @@ def iniciar_reconocimiento(idx_camara=0):
             if len(face_locations) == 0:
                 if tiempo_actual - tiempo_ultimo_estado_valido > TIEMPO_RETENCION:
                     estado_retenido = "1"
-                enviar_orden_pantalla(estado_retenido)
             else:
                 primer_nombre = nombres_en_pantalla[0]
                 primer_estado = estados_en_pantalla[0]
@@ -177,9 +213,19 @@ def iniciar_reconocimiento(idx_camara=0):
                     elif primer_estado == "Vencido":
                         estado_retenido = "5"
 
-                    tiempo_ultimo_estado_valido = tiempo_actual
+                tiempo_ultimo_estado_valido = tiempo_actual
 
-                enviar_orden_pantalla(estado_retenido)
+            if estado_retenido != estado_anterior_pitido:
+                if sonido_activado:
+                    if estado_retenido == "3":
+                        emitir_pitido_async(tipo="doble")
+                    elif estado_retenido == "4":
+                        emitir_pitido_async(tipo="simple")
+                    elif estado_retenido == "5":
+                        emitir_pitido_async(tipo="largo")
+                estado_anterior_pitido = estado_retenido
+
+            enviar_orden_pantalla(estado_retenido)
 
         process_this_frame = not process_this_frame
 
@@ -210,7 +256,12 @@ def iniciar_reconocimiento(idx_camara=0):
         canvas[0:h, 0:w] = frame
         canvas[0:h, w:w+ancho_panel] = BG_DARK
         cv2.rectangle(canvas, (w, 0), (w + ancho_panel, 80), BG_SURFACE, cv2.FILLED)
-        cv2.putText(canvas, "ASISTENCIAS RECIENTES", (w + 25, 50), cv2.FONT_HERSHEY_DUPLEX, 0.85, TEXT_LIGHT, 1)
+
+        texto_sonido = f"Sonido: {'ON' if sonido_activado else 'OFF'} (Tecla 'S')"
+        color_sonido = COLOR_ACTIVO if sonido_activado else TEXT_MUTED
+        cv2.putText(canvas, texto_sonido, (w + 25, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color_sonido, 1)
+
+        cv2.putText(canvas, "ASISTENCIAS RECIENTES", (w + 25, 65), cv2.FONT_HERSHEY_DUPLEX, 0.75, TEXT_LIGHT, 1)
         cv2.line(canvas, (w, 80), (w + ancho_panel, 80), ACCENT_MAIN, 3)
 
         y_offset = 110
@@ -231,6 +282,8 @@ def iniciar_reconocimiento(idx_camara=0):
         key = cv2.waitKey(1) & 0xFF
         if key in (ord('q'), ord('Q'), 27):
             break
+        elif key in (ord('s'), ord('S')):
+            sonido_activado = not sonido_activado
 
     video_capture.release()
     cv2.destroyAllWindows()
