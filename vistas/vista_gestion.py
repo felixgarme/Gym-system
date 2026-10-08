@@ -333,12 +333,23 @@ def setup_tab_gestion(parent_frame, app):
                             "Shift_L", "Shift_R", "Control_L", "Control_R",
                             "Left", "Right", "Home", "End"):
             return
+
         texto = entry_buscar.get().strip().lower()
         listbox_sugerencias.delete(0, tk.END)
+
         if not texto:
             listbox_sugerencias.place_forget()
             return
-        coincidencias = [n for n in app.nombres_socios if texto in n.lower()]
+
+        try:
+            socios = database.obtener_todos_los_socios()
+            nombres_actualizados = [socio[1] for socio in socios if socio[1]]
+        except Exception as e:
+            print(f"Error al obtener socios para autocompletado: {e}")
+            nombres_actualizados = []
+
+        coincidencias = [n for n in nombres_actualizados if texto in n.lower()]
+
         if coincidencias:
             for nombre in coincidencias:
                 listbox_sugerencias.insert(tk.END, nombre)
@@ -553,7 +564,7 @@ def reencodear_y_actualizar_socio(nombre):
         except Exception as e:
             print(f"Error procesando {archivo}: {e}")
 
-    conn = sqlite3.connect(database.DB_NAME)
+    conn = database.conectar_db()
     cursor = conn.cursor()
 
     if encodings_lista:

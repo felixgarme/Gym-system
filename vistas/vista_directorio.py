@@ -15,11 +15,11 @@ from vistas import vista_asistencia
 CHECK_OFF = "☐"
 CHECK_ON = "☑"
 
-
 def setup_tab_datos(parent_frame):
 
-    # Socios marcados con casilla: {id_socio: nombre}
-    marcados = {}
+    # Usamos un conjunto (set) basado en 'nombre' porque en tu BD el nombre es UNIQUE.
+    # Esto evita problemas de selección si hay socios con el id_socio vacío.
+    marcados = set()
 
     top_frame = ttk.Frame(parent_frame)
     top_frame.pack(fill=X, pady=(20, 10), padx=40)
@@ -33,9 +33,6 @@ def setup_tab_datos(parent_frame):
     lbl_contador = ttk.Label(top_frame, text="Marcados: 0", font=("Segoe UI", 10, "bold"), bootstyle="secondary")
     lbl_contador.pack(side=LEFT, padx=(10, 0))
 
-    # ------------------------------------------------------------------
-    # Utilidades de selección con casillas
-    # ------------------------------------------------------------------
     def obtener_marcados_visibles():
         """Devuelve [(id, nombre), ...] de las filas visibles que están marcadas."""
         resultado = []
@@ -49,22 +46,20 @@ def setup_tab_datos(parent_frame):
         visibles = obtener_marcados_visibles()
         lbl_contador.config(text=f"Marcados: {len(visibles)}")
 
-        # Actualizar el icono del encabezado según si todos están marcados
         items = tabla.get_children()
         todos = len(items) > 0 and len(visibles) == len(items)
         tabla.heading("Sel", text=CHECK_ON if todos else CHECK_OFF)
 
     def alternar_fila(item):
         valores = tabla.item(item, "values")
-        id_socio = str(valores[1])
         nombre = valores[2]
 
         if valores[0] == CHECK_ON:
             tabla.set(item, "Sel", CHECK_OFF)
-            marcados.pop(id_socio, None)
+            marcados.discard(nombre)
         else:
             tabla.set(item, "Sel", CHECK_ON)
-            marcados[id_socio] = nombre
+            marcados.add(nombre)
 
         actualizar_contador()
 
@@ -77,26 +72,22 @@ def setup_tab_datos(parent_frame):
 
         for item in items:
             valores = tabla.item(item, "values")
-            id_socio = str(valores[1])
+            nombre = valores[2]
             if todos_marcados:
                 tabla.set(item, "Sel", CHECK_OFF)
-                marcados.pop(id_socio, None)
+                marcados.discard(nombre)
             else:
                 tabla.set(item, "Sel", CHECK_ON)
-                marcados[id_socio] = valores[2]
+                marcados.add(nombre)
 
         actualizar_contador()
 
-    # ------------------------------------------------------------------
-    # Exportar
-    # ------------------------------------------------------------------
     def exportar_excel():
         items = tabla.get_children()
         if not items:
             messagebox.showinfo("Exportar", "No hay datos para exportar.")
             return
 
-        # Si hay socios marcados se exportan solo ellos; si no, todos
         items_marcados = [i for i in items if tabla.item(i, "values")[0] == CHECK_ON]
         items_a_exportar = items_marcados if items_marcados else items
 
@@ -118,7 +109,6 @@ def setup_tab_datos(parent_frame):
 
                 for item in items_a_exportar:
                     valores = tabla.item(item, "values")
-                    # valores[0] es la casilla, se omite
                     writer.writerow(valores[1:8])
 
             messagebox.showinfo("Éxito", f"Datos exportados correctamente a:\n{filepath}")
@@ -129,11 +119,7 @@ def setup_tab_datos(parent_frame):
         entry_buscar.delete(0, END)
         cargar_datos()
 
-    # ------------------------------------------------------------------
-    # Eliminar (uno o varios)
-    # ------------------------------------------------------------------
     def eliminar_seleccion():
-        # Prioridad: socios con casilla marcada; si no hay, el seleccionado en la tabla
         lista_eliminar = obtener_marcados_visibles()
 
         if not lista_eliminar:
@@ -177,7 +163,7 @@ def setup_tab_datos(parent_frame):
                 if os.path.exists(ruta_carpeta):
                     shutil.rmtree(ruta_carpeta)
 
-                marcados.pop(str(id_socio), None)
+                marcados.discard(nombre_socio)
                 eliminados += 1
             except Exception as e:
                 errores.append(f"{nombre_socio}: {e}")
@@ -204,15 +190,14 @@ def setup_tab_datos(parent_frame):
     btn_exportar = ttk.Button(top_frame, text="📊 Exportar a Excel", bootstyle="success", command=exportar_excel)
     btn_exportar.pack(side=RIGHT, padx=5)
 
-    # ------------------------------------------------------------------
-    # Tabla
-    # ------------------------------------------------------------------
     table_frame = ttk.Frame(parent_frame)
     table_frame.pack(fill=BOTH, expand=True, padx=40, pady=(0, 30))
 
     columnas = ("Sel", "ID", "Nombre", "Inicio", "Vence", "Pago", "Estado", "Fotos", "Carpeta", "Acción")
 
     tabla = ttk.Treeview(table_frame, columns=columnas, show='headings', selectmode="extended", bootstyle="primary")
+
+    tabla.tag_configure("vencido", foreground="gray")
 
     def ordenar_columna(tv, col, reverse):
         l = [(tv.set(k, col), k) for k in tv.get_children('')]
@@ -235,7 +220,7 @@ def setup_tab_datos(parent_frame):
         tabla.heading(col, text=texto, command=lambda c=col: ordenar_columna(tabla, c, False))
 
     tabla.column("Sel", width=40, anchor=CENTER, stretch=False)
-    tabla.column("ID", width=40, anchor=CENTER)
+    tabla.column("ID", width=80, anchor=CENTER)
     tabla.column("Nombre", width=180, anchor=W)
     tabla.column("Inicio", width=95, anchor=CENTER)
     tabla.column("Vence", width=95, anchor=CENTER)
@@ -258,16 +243,28 @@ def setup_tab_datos(parent_frame):
         socios = database.obtener_lista_socios()
         hoy_str = datetime.now().strftime("%Y-%m-%d")
 
-        ids_existentes = set()
+        nombres_existentes = set()
 
         for socio in socios:
-            id_socio, nombre, inicio, fin, pago = socio
-            ids_existentes.add(str(id_socio))
+            # Si retorna 6 elementos (nuevo modelo con socio_id)
+            if len(socio) == 6:
+                id_interno, id_socio, nombre, inicio, fin, pago = socio
+            # Si retorna 5 (modelo viejo), NUNCA usamos el id_interno como id_socio
+            else:
+                id_interno, nombre, inicio, fin, pago = socio
+                id_socio = ""
 
-            if filtro and filtro not in str(nombre).lower() and filtro not in str(id_socio):
+            # Garantizamos que el ID correcto se vea limpio o vacío
+            id_socio = str(id_socio) if id_socio is not None and str(id_socio).strip() != "None" else ""
+
+            nombres_existentes.add(nombre)
+
+            if filtro and filtro not in str(nombre).lower() and filtro not in id_socio.lower():
                 continue
 
             estado = "Activo" if fin >= hoy_str else "Vencido"
+
+            fila_tags = ("vencido",) if estado == "Vencido" else ()
 
             tiene_fotos = "❌ No"
             ruta_carpeta = os.path.join(database.CARPETA_PRINCIPAL, str(nombre))
@@ -277,14 +274,12 @@ def setup_tab_datos(parent_frame):
                 if len(archivos) > 0:
                     tiene_fotos = "✅ Sí"
 
-            casilla = CHECK_ON if str(id_socio) in marcados else CHECK_OFF
+            casilla = CHECK_ON if nombre in marcados else CHECK_OFF
 
-            tabla.insert("", END, values=(casilla, id_socio, nombre, inicio, fin, pago, estado, tiene_fotos, "📁 Abrir Carpeta", "📅 Ver Asistencias"))
+            tabla.insert("", END, values=(casilla, id_socio, nombre, inicio, fin, pago, estado, tiene_fotos, "📁 Abrir Carpeta", "📅 Ver Asistencias"), tags=fila_tags)
 
-        # Limpiar marcas de socios que ya no existen
-        for id_marcado in list(marcados.keys()):
-            if id_marcado not in ids_existentes:
-                marcados.pop(id_marcado, None)
+        # Limpiamos los marcados que ya no existan en la BD
+        marcados.intersection_update(nombres_existentes)
 
         actualizar_contador()
 
@@ -304,11 +299,9 @@ def setup_tab_datos(parent_frame):
                 valores = tabla.item(fila_seleccionada, "values")
                 nombre_socio = valores[2]
 
-                # Columna de casilla
                 if columna == "#1":
                     alternar_fila(fila_seleccionada)
 
-                # Abrir carpeta
                 elif columna == "#9":
                     ruta_carpeta = os.path.join(database.CARPETA_PRINCIPAL, nombre_socio)
 
@@ -323,7 +316,6 @@ def setup_tab_datos(parent_frame):
                     else:
                         subprocess.Popen(["xdg-open", ruta_carpeta])
 
-                # Ver asistencias
                 elif columna == "#10":
                     vista_asistencia.mostrar_ventana(nombre_socio)
 

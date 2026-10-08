@@ -16,6 +16,7 @@ def inicializar_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS socios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            socio_id TEXT,
             nombre TEXT UNIQUE NOT NULL,
             encoding BLOB NOT NULL,
             fecha_inicio TEXT NOT NULL,
@@ -23,6 +24,11 @@ def inicializar_db():
             medio_pago TEXT NOT NULL
         )
     ''')
+
+    cursor.execute("PRAGMA table_info(socios)")
+    columnas_socios = [columna[1] for columna in cursor.fetchall()]
+    if columnas_socios and "socio_id" not in columnas_socios:
+        cursor.execute("ALTER TABLE socios ADD COLUMN socio_id TEXT")
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS asistencias (
@@ -70,11 +76,11 @@ def abrir_carpeta_socio(nombre):
     else:
         subprocess.Popen(["xdg-open", ruta])
 
-def guardar_socio(nombre, encoding_bytes, inicio, fin, pago):
+def guardar_socio(socio_id, nombre, encoding_bytes, inicio, fin, pago):
     conn = conectar_db()
     cursor = conn.cursor()
-    cursor.execute('''INSERT INTO socios (nombre, encoding, fecha_inicio, fecha_fin, medio_pago)
-                      VALUES (?, ?, ?, ?, ?)''', (nombre, encoding_bytes, inicio, fin, pago))
+    cursor.execute('''INSERT INTO socios (socio_id, nombre, encoding, fecha_inicio, fecha_fin, medio_pago)
+                      VALUES (?, ?, ?, ?, ?, ?)''', (socio_id, nombre, encoding_bytes, inicio, fin, pago))
     conn.commit()
     conn.close()
 
@@ -114,7 +120,11 @@ def registrar_asistencia(socio_id, fecha_hora):
 def obtener_lista_socios():
     conn = conectar_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, nombre, fecha_inicio, fecha_fin, medio_pago FROM socios")
+    try:
+        cursor.execute("SELECT id, socio_id, nombre, fecha_inicio, fecha_fin, medio_pago FROM socios")
+    except sqlite3.OperationalError:
+        cursor.execute("SELECT id, id, nombre, fecha_inicio, fecha_fin, medio_pago FROM socios")
+
     filas = cursor.fetchall()
     conn.close()
     return filas
