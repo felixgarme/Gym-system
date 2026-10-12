@@ -4,19 +4,23 @@ from tkinter import font as tkfont
 import os
 import cv2
 import time
+import threading
 import numpy as np
-import sqlite3
 import face_recognition
 from PIL import Image, ImageTk
 import database
 
 imagenes_referencia = []
+EXTENSIONES = ('.png', '.jpg', '.jpeg')
 
 def abrir_camara(indice):
-    """Abre una cámara por índice (usa DirectShow en Windows para mayor compatibilidad)."""
-    if os.name == 'nt':
-        return cv2.VideoCapture(indice, cv2.CAP_DSHOW)
-    return cv2.VideoCapture(indice)
+    """Abre una cámara por índice (DirectShow en Windows) con buffer mínimo."""
+    cap = cv2.VideoCapture(indice, cv2.CAP_DSHOW) if os.name == 'nt' else cv2.VideoCapture(indice)
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    except Exception:
+        pass
+    return cap
 
 def detectar_camaras(max_indices=6):
     """Devuelve la lista de índices de cámaras que funcionan."""
@@ -24,19 +28,94 @@ def detectar_camaras(max_indices=6):
     for i in range(max_indices):
         cap = abrir_camara(i)
         try:
-            if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
-                    disponibles.append(i)
+            if cap.isOpened() and cap.read()[0]:
+                disponibles.append(i)
         finally:
             cap.release()
     return disponibles
+
+def listar_imagenes(ruta):
+    """Imágenes de una carpeta ordenadas de la más reciente a la más antigua."""
+    archivos = [f for f in os.listdir(ruta) if f.lower().endswith(EXTENSIONES)]
+    archivos.sort(key=lambda x: os.path.getmtime(os.path.join(ruta, x)), reverse=True)
+    return archivos
+
+def dibujar_guia(frame, estado):
+    """Dibuja textos, círculo rojo guía y botón X sobre el frame de vista previa."""
+    h, w = frame.shape[:2]
+    if estado["guia"]:
+        centro = (w // 2, h // 2)
+        radio = int(min(w, h) * 0.40)
+        cv2.circle(frame, centro, radio, (0, 0, 255), 4)
+        cv2.putText(frame, "Coloca tu cara dentro del circulo", (centro[0] - 170, centro[1] + radio + 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        x1, y1, x2, y2 = w - 42, 10, w - 10, 42
+        estado["boton_x"] = (x1, y1, x2, y2)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), -1)
+        cv2.line(frame, (x1 + 8, y1 + 8), (x2 - 8, y2 - 8), (255, 255, 255), 2)
+        cv2.line(frame, (x1 + 8, y2 - 8), (x2 - 8, y1 + 8), (255, 255, 255), 2)
+    else:
+        estado["boton_x"] = None
+    return frame
+
+def reencodear_y_actualizar_socio(nombre):
+    """Recalcula el perfil facial promedio del socio (solo reduce la copia usada para el reconocimiento)."""
+    ruta_carpeta = os.path.join(database.CARPETA_PRINCIPAL, nombre)
+    if not os.path.exists(ruta_carpeta):
+        return
+
+    encodings_lista = []
+    for archivo in listar_imagenes(ruta_carpeta):
+        try:
+            img = cv2.imread(os.path.join(ruta_carpeta, archivo))
+            if img is None:
+                continue
+            h, w = img.shape[:2]
+            escala = 800 / max(h, w)
+            if escala < 1:
+                img = cv2.resize(img, None, fx=escala, fy=escala, interpolation=cv2.INTER_AREA)
+            encs = face_recognition.face_encodings(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            if encs:
+                encodings_lista.append(encs[0])
+        except Exception as e:
+            print(f"Error procesando {archivo}: {e}")
+
+    conn = database.conectar_db()
+    try:
+        valor = np.mean(encodings_lista, axis=0).tobytes() if encodings_lista else None
+        conn.execute("UPDATE socios SET encoding = ? WHERE nombre = ?", (valor, nombre))
+        conn.commit()
+    finally:
+        conn.close()
+
+def reencodear_async(widget, nombre, al_terminar=None):
+    """Ejecuta el re-encoding en un hilo para no congelar la interfaz."""
+    hecho = threading.Event()
+
+    def tarea():
+        try:
+            reencodear_y_actualizar_socio(nombre)
+        except Exception as e:
+            print(f"Error re-encodeando {nombre}: {e}")
+        finally:
+            hecho.set()
+
+    def sondear():
+        if hecho.is_set():
+            if al_terminar:
+                al_terminar()
+        else:
+            widget.after(150, sondear)
+
+    threading.Thread(target=tarea, daemon=True).start()
+    sondear()
 
 def setup_tab_gestion(parent_frame, app):
     app.socio_actual_cargado = ""
     app.ultima_revision_fotos = {}
     app.camara_indice = 0
     app.camaras_disponibles = [0]
+    app.reencodeando = False
 
     fuente_normal = tkfont.Font(family="Arial", size=10)
     fuente_negrita = tkfont.Font(family="Arial", size=10, weight="bold")
@@ -47,31 +126,23 @@ def setup_tab_gestion(parent_frame, app):
 
     frame_busqueda = ttk.Frame(main_container)
     frame_busqueda.pack(fill='x', pady=(0, 10))
-
     ttk.Label(frame_busqueda, text="Buscar Socio:", font=fuente_negrita).pack(side='left', padx=(0, 10))
-
-    btn_buscar = ttk.Button(frame_busqueda, text="🔍 Buscar", command=lambda: ejecutar_busqueda_completa())
-    btn_buscar.pack(side='right')
+    ttk.Button(frame_busqueda, text="🔍 Buscar",
+               command=lambda: ejecutar_busqueda_completa()).pack(side='right')
 
     entry_buscar = ttk.Entry(frame_busqueda, font=fuente_normal)
     entry_buscar.pack(side='left', fill='x', expand=True, padx=(0, 10))
     app.buscar_nombre = entry_buscar
 
     listbox_sugerencias = tk.Listbox(
-        main_container, height=5, font=fuente_lista,
-        selectmode=tk.BROWSE,
-        exportselection=False,
-        activestyle='none',
-        cursor="hand2",
-        highlightthickness=1,
-        relief='solid', borderwidth=1
-    )
+        main_container, height=5, font=fuente_lista, selectmode=tk.BROWSE,
+        exportselection=False, activestyle='none', cursor="hand2",
+        highlightthickness=1, relief='solid', borderwidth=1)
 
     ttk.Separator(main_container, orient='horizontal').pack(fill='x', pady=5)
 
     frame_contenido = ttk.Frame(main_container)
     frame_contenido.pack(fill='both', expand=True, pady=5)
-
     frame_contenido.columnconfigure(0, weight=2, uniform="col_principal", minsize=220)
     frame_contenido.columnconfigure(1, weight=3, uniform="col_principal", minsize=280)
     frame_contenido.rowconfigure(0, weight=1)
@@ -95,9 +166,9 @@ def setup_tab_gestion(parent_frame, app):
     frame_datos.columnconfigure(1, weight=1)
     frame_datos.rowconfigure(4, weight=1)
 
-    btn_actualizar = ttk.Button(frame_datos, text="💾 Actualizar / Renovar",
-                                command=lambda: actualizar_socio(app, entry_buscar, act_inicio, act_fin, act_pago))
-    btn_actualizar.grid(row=3, column=0, columnspan=2, pady=(16, 0), sticky='ew')
+    ttk.Button(frame_datos, text="💾 Actualizar / Renovar",
+               command=lambda: actualizar_socio(app, entry_buscar, act_inicio, act_fin, act_pago)
+               ).grid(row=3, column=0, columnspan=2, pady=(16, 0), sticky='ew')
 
     frame_fotos_wrapper = ttk.LabelFrame(frame_contenido, text=" Fotografías del Socio ", padding=8)
     frame_fotos_wrapper.grid(row=0, column=1, sticky='nsew', padx=(8, 0))
@@ -107,7 +178,6 @@ def setup_tab_gestion(parent_frame, app):
 
     frame_camara = ttk.Frame(frame_acciones_fotos)
     frame_camara.pack(fill='x', pady=(0, 6))
-
     ttk.Label(frame_camara, text="Cámara:", font=fuente_normal).pack(side='left', padx=(0, 5))
 
     combo_camara = ttk.Combobox(frame_camara, values=["Cámara 0"], state="readonly", font=fuente_normal)
@@ -120,29 +190,23 @@ def setup_tab_gestion(parent_frame, app):
 
     frame_botones_fotos = ttk.Frame(frame_acciones_fotos)
     frame_botones_fotos.pack(fill='x')
-
-    btn_abrir_carpeta = ttk.Button(frame_botones_fotos, text="📂 Abrir Carpeta",
-                                   command=lambda: abrir_carpeta_socio_actual(entry_buscar.get()))
-    btn_abrir_carpeta.pack(side='left', fill='x', expand=True, padx=(0, 5))
-
-    btn_tomar_foto = ttk.Button(frame_botones_fotos, text="📷 Tomar Foto",
-                                command=lambda: capturar_foto_socio(app, entry_buscar.get()))
-    btn_tomar_foto.pack(side='right', fill='x', expand=True, padx=(5, 0))
+    ttk.Button(frame_botones_fotos, text="📂 Abrir Carpeta",
+               command=lambda: abrir_carpeta_socio_actual(entry_buscar.get())
+               ).pack(side='left', fill='x', expand=True, padx=(0, 5))
+    ttk.Button(frame_botones_fotos, text="📷 Tomar Foto",
+               command=lambda: capturar_foto_socio(app, entry_buscar.get())
+               ).pack(side='right', fill='x', expand=True, padx=(5, 0))
 
     frame_fotos = ttk.Frame(frame_fotos_wrapper)
     frame_fotos.pack(fill='both', expand=True, pady=(0, 8))
     frame_fotos.grid_propagate(False)
-
-    lbl_estado_foto = ttk.Label(frame_fotos, text="Busca un socio para\nver sus fotografías.",
-                                justify="center", foreground="gray", font=fuente_normal)
-    lbl_estado_foto.grid(row=0, column=0, sticky="nsew")
+    ttk.Label(frame_fotos, text="Busca un socio para\nver sus fotografías.",
+              justify="center", foreground="gray", font=fuente_normal).grid(row=0, column=0, sticky="nsew")
     frame_fotos.rowconfigure(0, weight=1)
     frame_fotos.columnconfigure(0, weight=1)
 
     def actualizar_combo_camaras():
-        """Rellena el combobox con las cámaras detectadas y conserva la seleccionada."""
-        etiquetas = [f"Cámara {i}" for i in app.camaras_disponibles]
-        combo_camara.configure(values=etiquetas)
+        combo_camara.configure(values=[f"Cámara {i}" for i in app.camaras_disponibles])
         if app.camara_indice in app.camaras_disponibles:
             combo_camara.current(app.camaras_disponibles.index(app.camara_indice))
         else:
@@ -162,7 +226,6 @@ def setup_tab_gestion(parent_frame, app):
         if not encontradas:
             messagebox.showwarning("Cámaras", "No se detectó ninguna cámara conectada.")
             encontradas = [0]
-
         app.camaras_disponibles = encontradas
         actualizar_combo_camaras()
 
@@ -172,7 +235,6 @@ def setup_tab_gestion(parent_frame, app):
             app.camara_indice = app.camaras_disponibles[pos]
 
     combo_camara.bind("<<ComboboxSelected>>", al_cambiar_camara)
-
     main_container.after(300, refrescar_camaras)
 
     def ajustar_tamanos(event=None):
@@ -189,88 +251,67 @@ def setup_tab_gestion(parent_frame, app):
 
     main_container.bind("<Configure>", ajustar_tamanos)
 
-    def cargar_fotos(nombre_socio):
-        global imagenes_referencia
-        imagenes_referencia.clear()
+    def mostrar_mensaje_frame(texto, color):
+        frame_fotos.columnconfigure(0, weight=1)
+        ttk.Label(frame_fotos, text=texto, foreground=color).grid(row=0, column=0, sticky="nsew")
+        app.ultima_revision_fotos = {}
 
+    def cargar_fotos(nombre_socio):
+        imagenes_referencia.clear()
         app.socio_actual_cargado = nombre_socio
 
         frame_fotos.unbind("<Configure>")
         for widget in frame_fotos.winfo_children():
             widget.destroy()
-
-        cols_actuales, _ = frame_fotos.grid_size()
-        for col in range(max(cols_actuales, 5)):
+        for col in range(max(frame_fotos.grid_size()[0], 5)):
             frame_fotos.columnconfigure(col, weight=0, uniform="")
 
         ruta_carpeta = os.path.join(database.CARPETA_PRINCIPAL, nombre_socio)
-
         if not os.path.exists(ruta_carpeta):
-            frame_fotos.columnconfigure(0, weight=1)
-            ttk.Label(frame_fotos, text="No tiene carpeta de fotos.", foreground="red").grid(row=0, column=0, sticky="nsew")
-            app.ultima_revision_fotos = {}
-            return
+            return mostrar_mensaje_frame("No tiene carpeta de fotos.", "red")
 
-        archivos = [f for f in os.listdir(ruta_carpeta) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        archivos_mostrar = listar_imagenes(ruta_carpeta)[:3]
+        if not archivos_mostrar:
+            return mostrar_mensaje_frame("Sin fotos registradas.", "gray")
 
-        if not archivos:
-            frame_fotos.columnconfigure(0, weight=1)
-            ttk.Label(frame_fotos, text="Sin fotos registradas.", foreground="gray").grid(row=0, column=0, sticky="nsew")
-            app.ultima_revision_fotos = {}
-            return
+        app.ultima_revision_fotos = {f: os.path.getmtime(os.path.join(ruta_carpeta, f))
+                                     for f in archivos_mostrar}
 
-        archivos.sort(key=lambda x: os.path.getmtime(os.path.join(ruta_carpeta, x)), reverse=True)
-        archivos_mostrar = archivos[:3]
-
-        app.ultima_revision_fotos = {f: os.path.getmtime(os.path.join(ruta_carpeta, f)) for f in archivos_mostrar}
-
-        pil_images = []
-        labels = []
-
+        pil_images, labels = [], []
         frame_fotos.rowconfigure(0, weight=1)
 
-        for i in range(len(archivos_mostrar)):
+        for i, archivo in enumerate(archivos_mostrar):
             frame_fotos.columnconfigure(i, weight=1, uniform="col_foto")
-
-            ruta_img = os.path.join(ruta_carpeta, archivos_mostrar[i])
             try:
-                img_pil = Image.open(ruta_img)
+                img_pil = Image.open(os.path.join(ruta_carpeta, archivo))
+                img_pil.draft("RGB", (800, 800))
+                img_pil.load()
                 pil_images.append(img_pil)
-
-                lbl_img = ttk.Label(frame_fotos, anchor="center")
-                lbl_img.grid(row=0, column=i, sticky="nsew", padx=3, pady=3)
-                labels.append(lbl_img)
+                lbl = ttk.Label(frame_fotos, anchor="center")
+                lbl.grid(row=0, column=i, sticky="nsew", padx=3, pady=3)
+                labels.append(lbl)
             except Exception as e:
-                print(f"Error abriendo imagen {archivos_mostrar[i]}: {e}")
+                print(f"Error abriendo imagen {archivo}: {e}")
 
-        app.last_w = 0
-        app.last_h = 0
+        app.last_w = app.last_h = 0
 
         def redimensionar_fotos(event=None):
             if not pil_images:
                 return
-
-            w_frame = frame_fotos.winfo_width()
-            h_frame = frame_fotos.winfo_height()
-
+            w_frame, h_frame = frame_fotos.winfo_width(), frame_fotos.winfo_height()
             if w_frame <= 10 or h_frame <= 10:
                 return
+            if abs(w_frame - app.last_w) < 5 and abs(h_frame - app.last_h) < 5:
+                return
+            app.last_w, app.last_h = w_frame, h_frame
 
-            if hasattr(app, 'last_w') and hasattr(app, 'last_h'):
-                if abs(w_frame - app.last_w) < 5 and abs(h_frame - app.last_h) < 5:
-                    return
-
-            app.last_w = w_frame
-            app.last_h = h_frame
-
-            num_fotos = len(pil_images)
-            w_disponible = max(20, (w_frame // num_fotos) - 10)
-            h_disponible = max(20, h_frame - 10)
+            w_disp = max(20, (w_frame // len(pil_images)) - 10)
+            h_disp = max(20, h_frame - 10)
 
             imagenes_referencia.clear()
             for img_pil, lbl in zip(pil_images, labels):
                 img_copy = img_pil.copy()
-                img_copy.thumbnail((w_disponible, h_disponible), Image.Resampling.LANCZOS)
+                img_copy.thumbnail((w_disp, h_disp), Image.Resampling.LANCZOS)
                 img_tk = ImageTk.PhotoImage(img_copy)
                 imagenes_referencia.append(img_tk)
                 lbl.config(image=img_tk)
@@ -278,22 +319,31 @@ def setup_tab_gestion(parent_frame, app):
         frame_fotos.bind("<Configure>", redimensionar_fotos)
         frame_fotos.after(100, redimensionar_fotos)
 
+    def reencodear_seguro(nombre, al_terminar=None):
+        """Re-encodea en segundo plano evitando ejecuciones simultáneas."""
+        if app.reencodeando:
+            return
+        app.reencodeando = True
+
+        def fin():
+            app.reencodeando = False
+            if al_terminar:
+                al_terminar()
+
+        reencodear_async(main_container, nombre, fin)
+
     def verificar_cambios_fotos():
         nombre = app.socio_actual_cargado
         if nombre:
             ruta_carpeta = os.path.join(database.CARPETA_PRINCIPAL, nombre)
             if os.path.exists(ruta_carpeta):
-                archivos = [f for f in os.listdir(ruta_carpeta) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-                archivos.sort(key=lambda x: os.path.getmtime(os.path.join(ruta_carpeta, x)), reverse=True)
-
-                estado_actual = {f: os.path.getmtime(os.path.join(ruta_carpeta, f)) for f in archivos[:3]}
-
-                if estado_actual != app.ultima_revision_fotos:
+                estado_actual = {f: os.path.getmtime(os.path.join(ruta_carpeta, f))
+                                 for f in listar_imagenes(ruta_carpeta)[:3]}
+                if estado_actual != app.ultima_revision_fotos and not app.reencodeando:
                     cargar_fotos(nombre)
-                    reencodear_y_actualizar_socio(nombre)
-            else:
-                if app.ultima_revision_fotos != {}:
-                    cargar_fotos(nombre)
+                    reencodear_seguro(nombre)
+            elif app.ultima_revision_fotos != {}:
+                cargar_fotos(nombre)
 
         main_container.after(2000, verificar_cambios_fotos)
 
@@ -302,57 +352,48 @@ def setup_tab_gestion(parent_frame, app):
     def ejecutar_busqueda_completa(event=None):
         nombre = entry_buscar.get().strip()
         listbox_sugerencias.place_forget()
-
         if not nombre:
             return
 
         datos = database.obtener_socio(nombre)
-
         if datos:
             act_inicio.delete(0, tk.END)
             act_inicio.insert(0, datos[0])
             act_fin.delete(0, tk.END)
             act_fin.insert(0, datos[1])
             act_pago.set(datos[2])
-
             cargar_fotos(nombre)
         else:
             messagebox.showerror("No encontrado", f"El socio '{nombre}' no existe.")
 
     def posicionar_lista():
-        """Coloca la lista justo debajo del Entry con su mismo ancho."""
         main_container.update_idletasks()
         x = entry_buscar.winfo_rootx() - main_container.winfo_rootx()
         y = entry_buscar.winfo_rooty() - main_container.winfo_rooty() + entry_buscar.winfo_height() + 2
-        ancho = max(entry_buscar.winfo_width(), 120)
-        listbox_sugerencias.place(x=x, y=y, width=ancho)
+        listbox_sugerencias.place(x=x, y=y, width=max(entry_buscar.winfo_width(), 120))
         listbox_sugerencias.lift()
 
     def filtrar_autocompletado(event):
-        if event.keysym in ("Up", "Down", "Return", "KP_Enter", "Escape", "Tab",
-                            "Shift_L", "Shift_R", "Control_L", "Control_R",
-                            "Left", "Right", "Home", "End"):
+        if event.keysym in ("Up", "Down", "Return", "KP_Enter", "Escape", "Tab", "Shift_L", "Shift_R",
+                            "Control_L", "Control_R", "Left", "Right", "Home", "End"):
             return
 
         texto = entry_buscar.get().strip().lower()
         listbox_sugerencias.delete(0, tk.END)
-
         if not texto:
             listbox_sugerencias.place_forget()
             return
 
         try:
-            socios = database.obtener_todos_los_socios()
-            nombres_actualizados = [socio[1] for socio in socios if socio[1]]
+            nombres = [s[1] for s in database.obtener_todos_los_socios() if s[1]]
         except Exception as e:
             print(f"Error al obtener socios para autocompletado: {e}")
-            nombres_actualizados = []
+            nombres = []
 
-        coincidencias = [n for n in nombres_actualizados if texto in n.lower()]
-
+        coincidencias = [n for n in nombres if texto in n.lower()]
         if coincidencias:
-            for nombre in coincidencias:
-                listbox_sugerencias.insert(tk.END, nombre)
+            for n in coincidencias:
+                listbox_sugerencias.insert(tk.END, n)
             listbox_sugerencias.configure(height=min(len(coincidencias), 6))
             posicionar_lista()
         else:
@@ -368,24 +409,20 @@ def setup_tab_gestion(parent_frame, app):
         listbox_sugerencias.see(indice)
 
     def entry_flecha_abajo(event):
-        """Flecha abajo en el Entry: pasa el foco a la lista y marca el primero."""
         if lista_visible():
             listbox_sugerencias.focus_set()
             _marcar(0)
             return "break"
 
     def entry_flecha_arriba(event):
-        """Flecha arriba en el Entry: pasa a la lista marcando el último."""
         if lista_visible():
             listbox_sugerencias.focus_set()
             _marcar(listbox_sugerencias.size() - 1)
             return "break"
 
     def lista_flecha_abajo(event):
-        total = listbox_sugerencias.size()
         sel = listbox_sugerencias.curselection()
-        actual = sel[0] if sel else -1
-        _marcar(min(actual + 1, total - 1))
+        _marcar(min((sel[0] if sel else -1) + 1, listbox_sugerencias.size() - 1))
         return "break"
 
     def lista_flecha_arriba(event):
@@ -402,9 +439,8 @@ def setup_tab_gestion(parent_frame, app):
         sel = listbox_sugerencias.curselection()
         if not sel:
             return "break"
-        nombre_seleccionado = listbox_sugerencias.get(sel[0])
         entry_buscar.delete(0, tk.END)
-        entry_buscar.insert(0, nombre_seleccionado)
+        entry_buscar.insert(0, listbox_sugerencias.get(sel[0]))
         listbox_sugerencias.place_forget()
         entry_buscar.focus_set()
         entry_buscar.icursor(tk.END)
@@ -412,7 +448,6 @@ def setup_tab_gestion(parent_frame, app):
         return "break"
 
     def clic_en_lista(event):
-        """El clic marca el elemento bajo el cursor y lo selecciona al soltar."""
         indice = listbox_sugerencias.nearest(event.y)
         if indice >= 0:
             _marcar(indice)
@@ -425,7 +460,6 @@ def setup_tab_gestion(parent_frame, app):
         return "break"
 
     def escribir_desde_lista(event):
-        """Si se escribe estando en la lista, vuelve al Entry y continúa escribiendo."""
         if event.keysym == "BackSpace":
             entry_buscar.focus_set()
             texto = entry_buscar.get()
@@ -434,7 +468,7 @@ def setup_tab_gestion(parent_frame, app):
             entry_buscar.icursor(tk.END)
             filtrar_autocompletado(event)
             return "break"
-        if event.char and event.char.isprintable() and len(event.char) == 1:
+        if event.char and len(event.char) == 1 and event.char.isprintable():
             entry_buscar.focus_set()
             entry_buscar.insert(tk.END, event.char)
             entry_buscar.icursor(tk.END)
@@ -442,11 +476,8 @@ def setup_tab_gestion(parent_frame, app):
             return "break"
 
     def ocultar_si_clic_fuera(event):
-        if not listbox_sugerencias.winfo_ismapped():
-            return
-        if event.widget in (listbox_sugerencias, entry_buscar):
-            return
-        listbox_sugerencias.place_forget()
+        if listbox_sugerencias.winfo_ismapped() and event.widget not in (listbox_sugerencias, entry_buscar):
+            listbox_sugerencias.place_forget()
 
     def abrir_carpeta_socio_actual(nombre):
         nombre = nombre.strip()
@@ -467,67 +498,109 @@ def setup_tab_gestion(parent_frame, app):
         indice_actual = app.camara_indice
         cap = abrir_camara(indice_actual)
         if not cap.isOpened():
-            messagebox.showerror(
-                "Error de Cámara",
-                f"No se pudo acceder a la cámara {indice_actual}.\n"
-                "Prueba seleccionando otra cámara en la lista."
-            )
+            cap.release()
+            messagebox.showerror("Error de Cámara",
+                                 f"No se pudo acceder a la cámara {indice_actual}.\n"
+                                 "Prueba seleccionando otra cámara en la lista.")
             return
 
-        messagebox.showinfo(
-            "Tomar Foto",
-            "Se abrirá la cámara.\n\n"
-            "- Presiona ESPACIO para tomar la foto.\n"
-            "- Presiona C para cambiar de cámara.\n"
-            "- Presiona ESC para cancelar."
-        )
+        messagebox.showinfo("Tomar Foto",
+                            "Se abrirá la cámara.\n\n"
+                            "- ESPACIO: tomar la foto\n"
+                            "- X (o clic en la X roja): cerrar el círculo guía\n"
+                            "- G: mostrar el círculo guía\n"
+                            "- C: cambiar de cámara\n"
+                            "- ESC: cancelar")
 
-        titulo_ventana = f"Tomar Foto - {nombre}"
+        titulo = f"Tomar Foto - {nombre}"
+        estado = {"guia": True, "boton_x": None}
+
+        def clic_raton(evento, x, y, flags, param):
+            if evento == cv2.EVENT_LBUTTONDOWN and param["boton_x"]:
+                x1, y1, x2, y2 = param["boton_x"]
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                    param["guia"] = False
+
+        cv2.namedWindow(titulo, cv2.WINDOW_AUTOSIZE)
+        cv2.setMouseCallback(titulo, clic_raton, estado)
+
         foto_guardada = False
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+        fallos = 0
+        try:
+            for _ in range(5):
+                cap.read()
 
-            display_frame = frame.copy()
-            cv2.putText(display_frame, "ESPACIO: Tomar Foto | C: Cambiar camara | ESC: Salir", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
-            cv2.putText(display_frame, f"Camara {indice_actual}", (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-            cv2.imshow(titulo_ventana, display_frame)
+            while True:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    fallos += 1
+                    if fallos > 30:
+                        break
+                    cv2.waitKey(30)
+                    continue
+                fallos = 0
 
-            key = cv2.waitKey(1) & 0xFF
-            if key == 32:
-                timestamp = int(time.time())
-                ruta_foto = os.path.join(ruta_carpeta, f"foto_{timestamp}.jpg")
-                cv2.imwrite(ruta_foto, frame)
-                foto_guardada = True
-                break
-            elif key == 27:
-                break
-            elif key in (ord('c'), ord('C')):
-                lista = app.camaras_disponibles
-                if len(lista) > 1:
-                    pos = lista.index(indice_actual) if indice_actual in lista else -1
-                    siguiente = lista[(pos + 1) % len(lista)]
-                    nuevo_cap = abrir_camara(siguiente)
-                    if nuevo_cap.isOpened():
-                        cap.release()
-                        cap = nuevo_cap
-                        indice_actual = siguiente
-                        app.camara_indice = siguiente
-                        if siguiente in lista:
+                h, w = frame.shape[:2]
+                escala = min(1.0, 960 / w)
+                if escala < 1.0:
+                    vista = cv2.resize(frame, None, fx=escala, fy=escala, interpolation=cv2.INTER_AREA)
+                else:
+                    vista = frame.copy()
+
+                dibujar_guia(vista, estado)
+                cv2.putText(vista, "ESPACIO: Foto | X: Ocultar guia | G: Guia | C: Camara | ESC: Salir",
+                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                cv2.putText(vista, f"Camara {indice_actual}", (10, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                cv2.imshow(titulo, vista)
+
+                key = cv2.waitKey(10) & 0xFF
+
+                if cv2.getWindowProperty(titulo, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+
+                if key == 32:
+                    ruta_foto = os.path.join(ruta_carpeta, f"foto_{int(time.time())}.jpg")
+                    foto_guardada = bool(cv2.imwrite(ruta_foto, frame))
+                    break
+                elif key == 27:
+                    break
+                elif key in (ord('x'), ord('X')):
+                    estado["guia"] = False
+                elif key in (ord('g'), ord('G')):
+                    estado["guia"] = True
+                elif key in (ord('c'), ord('C')):
+                    lista = app.camaras_disponibles
+                    if len(lista) > 1:
+                        pos = lista.index(indice_actual) if indice_actual in lista else -1
+                        siguiente = lista[(pos + 1) % len(lista)]
+                        nuevo_cap = abrir_camara(siguiente)
+                        if nuevo_cap.isOpened():
+                            cap.release()
+                            cap = nuevo_cap
+                            indice_actual = app.camara_indice = siguiente
                             combo_camara.current(lista.index(siguiente))
-                    else:
-                        nuevo_cap.release()
-
-        cap.release()
-        cv2.destroyAllWindows()
+                        else:
+                            nuevo_cap.release()
+        finally:
+            cap.release()
+            try:
+                cv2.destroyWindow(titulo)
+            except cv2.error:
+                pass
+            for _ in range(4):
+                cv2.waitKey(1)
 
         if foto_guardada:
-            reencodear_y_actualizar_socio(nombre)
             cargar_fotos(nombre)
-            messagebox.showinfo("Éxito", f"Nueva foto agregada y perfil facial actualizado para '{nombre}'.")
+            app.reencodeando = False
+            reencodear_seguro(nombre, lambda: messagebox.showinfo(
+                "Éxito", f"Nueva foto agregada y perfil facial actualizado para '{nombre}'."))
+        elif not ret_ok(fallos):
+            messagebox.showerror("Error de Cámara", "La cámara dejó de responder.")
+
+    def ret_ok(fallos):
+        return fallos <= 30
 
     entry_buscar.bind('<KeyRelease>', filtrar_autocompletado)
     entry_buscar.bind('<Down>', entry_flecha_abajo)
@@ -546,50 +619,15 @@ def setup_tab_gestion(parent_frame, app):
 
     parent_frame.winfo_toplevel().bind('<Button-1>', ocultar_si_clic_fuera, add='+')
 
-def reencodear_y_actualizar_socio(nombre):
-    ruta_carpeta = os.path.join(database.CARPETA_PRINCIPAL, nombre)
-    if not os.path.exists(ruta_carpeta):
-        return
-
-    encodings_lista = []
-    archivos = [f for f in os.listdir(ruta_carpeta) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-
-    for archivo in archivos:
-        ruta_img = os.path.join(ruta_carpeta, archivo)
-        try:
-            imagen = face_recognition.load_image_file(ruta_img)
-            encs = face_recognition.face_encodings(imagen)
-            if len(encs) > 0:
-                encodings_lista.append(encs[0])
-        except Exception as e:
-            print(f"Error procesando {archivo}: {e}")
-
-    conn = database.conectar_db()
-    cursor = conn.cursor()
-
-    if encodings_lista:
-        encoding_promedio = np.mean(encodings_lista, axis=0)
-        encoding_bytes = encoding_promedio.tobytes()
-        cursor.execute("UPDATE socios SET encoding = ? WHERE nombre = ?", (encoding_bytes, nombre))
-    else:
-        cursor.execute("UPDATE socios SET encoding = NULL WHERE nombre = ?", (nombre,))
-
-    conn.commit()
-    conn.close()
-
 def actualizar_socio(app, entry_buscar, entry_inicio, entry_fin, combo_pago):
     nombre = entry_buscar.get().strip()
-    inicio = entry_inicio.get()
-    fin = entry_fin.get()
-    pago = combo_pago.get()
+    inicio, fin, pago = entry_inicio.get(), entry_fin.get(), combo_pago.get()
 
     if not nombre or not inicio or not fin:
         messagebox.showwarning("Cuidado", "Busca a un socio primero.")
         return
 
-    exito = database.actualizar_socio(nombre, inicio, fin, pago)
-
-    if exito:
+    if database.actualizar_socio(nombre, inicio, fin, pago):
         messagebox.showinfo("Éxito", f"Membresía de {nombre} actualizada.")
         if hasattr(app, 'actualizar_tabla_excel'):
             app.actualizar_tabla_excel()
